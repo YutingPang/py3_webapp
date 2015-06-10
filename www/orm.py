@@ -43,23 +43,29 @@ def select(sql, args, size=None):
         return rs
 
 @asyncio.coroutine
-def execute(sql, args):
+def execute(sql, args, autocommit=True):
     log(sql)
     with (yield from __pool) as conn:
+        if not autocommit:
+            yield from conn.begin()
         try:
-            cur = yield from conn.sursor()
+            cur = yield from conn.cursor()
             yield from cur.execute(sql.replace('?', '%s'), args)
             affected = cur.rowcount
             yield from cur.close()
+            if not autocommit:
+                yield from conn.commit()
         except BaseException as e:
+            if not autocommit:
+                yield from conn.rollback()
             raise
         return affected
 
 def create_args_string(num):
-    L =[]
+    L = []
     for n in range(num):
         L.append('?')
-    return ','.join(L)
+    return ', '.join(L)
 
 class Field(object):
 
@@ -89,11 +95,11 @@ class IntegerField(Field):
 
 class FloatField(Field):
 
-    def __init__(self, name=None, primary_key=False, default=0):
+    def __init__(self, name=None, primary_key=False, default=0.0):
         super().__init__(name, 'real', primary_key, default)
 
 class TextField(Field):
-    
+
     def __init__(self, name=None, default=None):
         super().__init__(name, 'text', False, default)
 
@@ -102,20 +108,19 @@ class ModelMetaclass(type):
     def __new__(cls, name, bases, attrs):
         if name=='Model':
             return type.__new__(cls, name, bases, attrs)
-        tableName == attrs.get('__table__', None) or name
+        tableName = attrs.get('__table__', None) or name
         logging.info('found model: %s (table: %s)' % (name, tableName))
         mappings = dict()
         fields = []
         primaryKey = None
         for k, v in attrs.items():
             if isinstance(v, Field):
-                logging.info(' found mapping: %s ==> %s' % (k, v))
-                mapping[k] = v
+                logging.info('  found mapping: %s ==> %s' % (k, v))
+                mappings[k] = v
                 if v.primary_key:
                     #found primary_key
                     if primaryKey:
-                        raise StandardError('Duplicate primary key for field:
-                        %s' % k)
+                        raise StandardError('Duplicate primary key for field: %s' % k)
                     primaryKey = k
                 else:
                     fields.append(k)
@@ -123,25 +128,25 @@ class ModelMetaclass(type):
             raise StandardError('Primary key not found.')
         for k in mappings.keys():
             attrs.pop(k)
-        escaped_fields = list(map(lambda f: '`%s`' %f, fields))
+        escaped_fields = list(map(lambda f: '`%s`' % f, fields))
         attrs['__mappings__'] = mappings
         attrs['__table__'] = tableName
         attrs['__primary_key__'] = primaryKey
-        attrs['__field__'] = fields
-        attrs['__select__'] = 'select `%s`, %s from `%s`' % (primaryKey, ',' join(escaped_fields), tableName)
+        attrs['__fields__'] = fields
+        attrs['__select__'] = 'select `%s`, %s from `%s`' % (primaryKey, ', '.join(escaped_fields), tableName)
         attrs['__insert__'] = 'insert into `%s` (%s, `%s`) values (%s)' % (tableName, ', '.join(escaped_fields), primaryKey, create_args_string(len(escaped_fields) + 1))
-        attrs['__update__'] = 'update `%s` set %s where `%s`=?' % (tableName, ', '.join(map(lambda f: '`%s`=?' % (mapping.get(f).name or f), fields)), primaryKey) 
+        attrs['__update__'] = 'update `%s` set %s where `%s`=?' % (tableName, ', '.join(map(lambda f: '`%s`=?' % (mappings.get(f).name or f), fields)), primaryKey)
         attrs['__delete__'] = 'delete from `%s` where `%s`=?' % (tableName, primaryKey)
         return type.__new__(cls, name, bases, attrs)
 
 class Model(dict, metaclass=ModelMetaclass):
-    
+
     def __init__(self, **kw):
         super(Model, self).__init__(**kw)
 
     def __getattr__(self, key):
         try:
-            return key[key]
+            return self[key]
         except KeyError:
             raise AttributeError(r"'Model' object has no attribute '%s'" % key)
 
@@ -173,7 +178,7 @@ class Model(dict, metaclass=ModelMetaclass):
             args = []
         orderBy = kw.get('orderBy', None)
         if orderBy:
-            sql.append('orderBy')
+            sql.append('order by')
             sql.append(orderBy)
         limit = kw.get('limit', None)
         if limit is not None:
@@ -191,7 +196,7 @@ class Model(dict, metaclass=ModelMetaclass):
 
     @classmethod
     @asyncio.coroutine
-    def findNumber(cls, selectField, where=None, args=None)
+    def findNumber(cls, selectField, where=None, args=None):
         ' find number by select and where. '
         sql = ['select %s _num_ from `%s`' % (selectField, cls.__table__)]
         if where:
@@ -211,7 +216,6 @@ class Model(dict, metaclass=ModelMetaclass):
             return None
         return cls(**rs[0])
 
-    @classmethod
     @asyncio.coroutine
     def save(self):
         args = list(map(self.getValueOrDefault, self.__fields__))
@@ -220,7 +224,6 @@ class Model(dict, metaclass=ModelMetaclass):
         if rows != 1:
             logging.warn('failed to insert record: affected rows: %s' % rows)
 
-    @classmethod
     @asyncio.coroutine
     def update(self):
         args = list(map(self.getValue, self.__fields__))
@@ -229,7 +232,6 @@ class Model(dict, metaclass=ModelMetaclass):
         if rows != 1:
             logging.warn('failed to update by primary key: affected rows: %s' % rows)
 
-    @classmethod
     @asyncio.coroutine
     def remove(self):
         args = [self.getValue(self.__primary_key__)]
