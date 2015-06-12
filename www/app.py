@@ -63,7 +63,7 @@ def data_factory(app, handler):
     return parse_data
 
 @asyncio.coroutine
-def response_factorY(app, handler):
+def response_factory(app, handler):
     @asyncio.coroutine
     def response(request):
         logging.info('Response handler')
@@ -104,7 +104,7 @@ def response_factorY(app, handler):
 
 def datetime_filter(t):
     delta = int(time.time() - t)
-    id delta < 60:
+    if delta < 60:
         return u'1 min ago'
     if delta < 3600:
         return u'%s mins ago' % (delta // 60)
@@ -117,7 +117,7 @@ def datetime_filter(t):
 
 @asyncio.coroutine
 def init(loop):
-    yield from orm.create_pool(loop=loop, host='127.0.0.1', port=3306, user='py5_webapp', passwd='py3_webapp', db='awesome') 
+    yield from orm.create_pool(loop=loop, host='127.0.0.1', port=3306, user='py3_webapp', passwd='py3_webapp', db='awesome') 
     app = web.Application(loop=loop, middlewares=[
         logger_factory, response_factory   
     ])
