@@ -33,7 +33,7 @@ def user2cookie(user, max_age):
 @asyncio.coroutine
 def cookie2user(cookie_str):
     '''
-    Parse cookie and load user if cookie is valid
+    Parse cookie and load user if cookie is valid.
     '''
     if not cookie_str:
         return None
@@ -122,6 +122,13 @@ def authenticate(*, email, passwd):
     r.body = json.dumps(user, ensure_ascii=False).encode('utf-8')
     return r
 
+@post('/api/blogs')
+def api_create_blog(request, *, name, summary, content):
+    check_admin(request)
+    if not name or not name.strip():
+        raise APIValueError('name', 'name connot be empty')
+    if not summary or not summary.strip():
+
 _RE_EMAIL = re.compile(r'^[a-z0-9\.\-\_]+\@[a-z0-9\_\-]+(\.[a-z0-9\-\_]+){1,4}$')
 _RE_SHA1 = re.compile(r'[0-9a-f]{40}$')
 
@@ -138,7 +145,7 @@ def api_register_user(*, email, name, passwd):
         raise APIError('register:failed', 'email', 'Email is already in use.')
     uid = next_id()
     sha1_passwd = '%s:%s' % (uid, passwd)
-    user = User(id=uid, name=name.strip(), email=email, passwd=hashlib.sha1(sha1_passwd.encode('utf-8')).hexdigest(), image='http://.gravatar.com/avatar/%s?d=mm&s=120' % hashlib.md5(email.encode('utf-8')).hexdigest())
+    user = User(id=uid, name=name.strip(), email=email, passwd=hashlib.sha1(sha1_passwd.encode('utf-8')).hexdigest(), image='http://www.gravatar.com/avatar/%s?d=mm&s=120' % hashlib.md5(email.encode('utf-8')).hexdigest())
     yield from user.save()
     # make session cookie:
     r = web.Response()

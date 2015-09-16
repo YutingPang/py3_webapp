@@ -31,7 +31,7 @@ def init_jinja2(app, **kw):
     path = kw.get('path', None)
     if path is None:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
-    logging.info('set jinja2 tempate path: %s' % path)
+    logging.info('set jinja2 template path: %s' % path)
     env = Environment(loader=FileSystemLoader(path), **options)
     filters = kw.get('filters', None)
     if filters is not None:
@@ -47,6 +47,23 @@ def logger_factory(app, handler):
         # yield from asyncio.sleep(0.3)
         return (yield from handler(request))
     return logger
+
+@asyncio.coroutine
+def auth_factory(app, handler):
+    @asyncio.coroutine
+    def auth(request):
+        logging.info('check user: %s %s' % (request.method, request.path))
+        request.__user__ = None
+        cookie_str = request.cookies.get(COOKIE_NAME)
+        if cookie_str:
+            user = yield from cookie2user(cookie_str)
+            if user:
+                logging.info('set current user: %s' % user.email)
+                request.__user__ = user
+        if request.path.startswith('/manage/') and (request.__user__ is None or not request.__user__.admin):
+            return web.HTTPFound('/signin')
+        return (yield from handler(request))
+    return auth
 
 @asyncio.coroutine
 def data_factory(app, handler):
@@ -66,7 +83,7 @@ def data_factory(app, handler):
 def response_factory(app, handler):
     @asyncio.coroutine
     def response(request):
-        logging.info('Response handler')
+        logging.info('Response handler...')
         r = yield from handler(request)
         if isinstance(r, web.StreamResponse):
             return r
@@ -76,7 +93,7 @@ def response_factory(app, handler):
             return resp
         if isinstance(r, str):
             if r.startswith('redirect:'):
-                return web.HTTPFoun(r[9:])
+                return web.HTTPFound(r[9:])
             resp = web.Response(body=r.encode('utf-8'))
             resp.content_type = 'text/html;charset=utf-8'
             return resp
@@ -87,6 +104,7 @@ def response_factory(app, handler):
                 resp.content_type = 'application/json;charset=utf-8'
                 return resp
             else:
+                r['__user__'] = request.__user__
                 resp = web.Response(body=app['__templating__'].get_template(template).render(**r).encode('utf-8'))
                 resp.content_type = 'text/html;charset=utf-8'
                 return resp
@@ -94,9 +112,9 @@ def response_factory(app, handler):
             return web.Response(t)
         if isinstance(r, tuple) and len(r) == 2:
             t, m = r
-            if isinstancet(t, int) and t >= 100 and t < 600:
+            if isinstance(t, int) and t >= 100 and t < 600:
                 return web.Response(t, str(m))
-        # default
+        # default:
         resp = web.Response(body=str(r).encode('utf-8'))
         resp.content_type = 'text/plain;charset=utf-8'
         return resp
